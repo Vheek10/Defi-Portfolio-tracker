@@ -3,7 +3,7 @@
 "use client";
 
 import { useState } from "react";
-import { PortfolioDashboard } from "./PortfolioDashboard";
+import { EnhancedPortfolioDashboard } from "./EnhancedPortfolioDashboard";
 import { DashboardSidebar } from "./DashboardSidebar";
 import { BarChart3, Wallet, Settings, Coins, Zap } from "lucide-react";
 
@@ -13,7 +13,7 @@ export function LaunchAppSection() {
 	const renderTabContent = () => {
 		switch (activeTab) {
 			case "portfolio":
-				return <PortfolioDashboard />;
+				return <EnhancedPortfolioDashboard />;
 			case "analytics":
 				return (
 					<div className="text-center py-12">
@@ -75,7 +75,7 @@ export function LaunchAppSection() {
 					</div>
 				);
 			default:
-				return <PortfolioDashboard />;
+				return <EnhancedPortfolioDashboard />;
 		}
 	};
 
@@ -96,7 +96,7 @@ export function LaunchAppSection() {
 							<div className="flex items-center justify-between">
 								<div>
 									<h1 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-										{activeTab === "portfolio" && "Portfolio Overview"}
+										{activeTab === "portfolio" && "Live Portfolio"}
 										{activeTab === "analytics" && "Advanced Analytics"}
 										{activeTab === "wallet" && "Wallet Management"}
 										{activeTab === "earn" && "Earn & Yield"}
@@ -104,7 +104,7 @@ export function LaunchAppSection() {
 									</h1>
 									<p className="text-gray-400 text-sm mt-1">
 										{activeTab === "portfolio" &&
-											"Track your multi-chain assets and performance"}
+											"Real-time prices and multi-chain balances"}
 										{activeTab === "analytics" &&
 											"Deep insights and historical data"}
 										{activeTab === "wallet" && "Manage your digital assets"}
@@ -124,8 +124,8 @@ export function LaunchAppSection() {
 						</div>
 					</header>
 
-					{/* Content Area */}
-					<main className="flex-1 overflow-auto">
+					{/* Content Area - Hide Scrollbar */}
+					<main className="flex-1 overflow-auto no-scrollbar">
 						<div className="p-6">{renderTabContent()}</div>
 					</main>
 				</div>

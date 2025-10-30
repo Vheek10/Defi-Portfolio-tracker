@@ -1,47 +1,46 @@
 /** @format */
 
-import { useAccount, useBalance, useBlockNumber } from "wagmi";
-import { useQuery } from "@tanstack/react-query";
+"use client";
+
+import { useAccount, useBalance } from "wagmi";
+import { useState, useEffect } from "react";
 import { formatEther } from "viem";
 
 export function usePortfolioData() {
-	const { address } = useAccount();
-	const { data: blockNumber } = useBlockNumber({ watch: true });
+	const { address, isConnected } = useAccount();
+	const { data: nativeBalance } = useBalance({ address });
+	const [portfolioData, setPortfolioData] = useState(null);
+	const [loading, setLoading] = useState(false);
 
-	// Native token balance
-	const { data: nativeBalance, isLoading: balanceLoading } = useBalance({
-		address,
-		query: {
-			refetchInterval: 10000,
-		},
-	});
+	useEffect(() => {
+		if (isConnected && address) {
+			fetchRealPortfolioData();
+		}
+	}, [isConnected, address]);
 
-	// Mock portfolio data - in real app, you'd fetch from DeFi protocols
-	const { data: portfolioValue, isLoading: portfolioLoading } = useQuery({
-		queryKey: ["portfolio", address, blockNumber],
-		queryFn: async () => {
-			// Simulate API call
-			await new Promise((resolve) => setTimeout(resolve, 1000));
-
-			if (!address) return 0;
-
-			// Mock portfolio calculation
-			const baseValue = nativeBalance
-				? parseFloat(formatEther(nativeBalance.value)) * 2500
-				: 0;
-			const randomGrowth = 1 + (Math.random() * 0.1 - 0.05); // ±5% change
-
-			return baseValue * randomGrowth;
-		},
-		enabled: !!address,
-		refetchInterval: 30000, // Refetch every 30 seconds
-	});
+	const fetchRealPortfolioData = async () => {
+		setLoading(true);
+		try {
+			// Mock API call - replace with real endpoints
+			const response = await fetch(`/api/portfolio/${address}`);
+			const data = await response.json();
+			setPortfolioData(data);
+		} catch (error) {
+			console.error("Error fetching portfolio data:", error);
+		} finally {
+			setLoading(false);
+		}
+	};
 
 	return {
-		address,
-		nativeBalance,
-		portfolioValue,
-		isLoading: balanceLoading || portfolioLoading,
-		blockNumber,
+		portfolioData,
+		loading,
+		nativeBalance: nativeBalance
+			? {
+					value: parseFloat(formatEther(nativeBalance.value)),
+					symbol: nativeBalance.symbol,
+			  }
+			: null,
+		refetch: fetchRealPortfolioData,
 	};
 }
