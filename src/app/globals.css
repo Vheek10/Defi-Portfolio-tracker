@@ -1,0 +1,135 @@
+/** @format */
+
+@import "tailwindcss";
+/* RainbowKit Modal Customizations */
+.rainbow-kit-connect-modal {
+	font-family: system-ui, sans-serif !important;
+}
+
+.rainbow-kit-connect-modal * {
+	box-sizing: border-box !important;
+}
+
+/* Ensure modal backdrop is properly blurred */
+[data-rk] [aria-modal="true"] {
+	backdrop-filter: blur(8px) !important;
+	background: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Modal container styling */
+[data-rk] .rk-modal {
+	border-radius: 24px !important;
+	border: 1px solid rgba(255, 255, 255, 0.1) !important;
+	background: linear-gradient(
+		135deg,
+		rgba(30, 30, 30, 0.95),
+		rgba(50, 50, 50, 0.95)
+	) !important;
+	backdrop-filter: blur(20px) !important;
+	box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Wallet option buttons */
+[data-rk] .rk-connect-wallet-option {
+	border-radius: 12px !important;
+	border: 1px solid rgba(255, 255, 255, 0.1) !important;
+	background: rgba(255, 255, 255, 0.05) !important;
+	transition: all 0.2s ease !important;
+}
+
+[data-rk] .rk-connect-wallet-option:hover {
+	background: rgba(255, 255, 255, 0.1) !important;
+	border-color: rgba(99, 102, 241, 0.5) !important;
+	transform: translateY(-2px) !important;
+}
+
+/* Account modal styling */
+[data-rk] .rk-account-modal {
+	border-radius: 24px !important;
+	border: 1px solid rgba(255, 255, 255, 0.1) !important;
+	background: linear-gradient(
+		135deg,
+		rgba(30, 30, 30, 0.95),
+		rgba(50, 50, 50, 0.95)
+	) !important;
+	backdrop-filter: blur(20px) !important;
+}
+
+/* Button styling in modals */
+[data-rk] button {
+	border-radius: 12px !important;
+	transition: all 0.2s ease !important;
+}
+
+[data-rk] button:hover {
+	transform: translateY(-1px) !important;
+}
+
+/* Text colors for better readability */
+[data-rk] {
+	color: white !important;
+}
+
+[data-rk] .rk-text {
+	color: white !important;
+}
+
+/* Network selector styling */
+[data-rk] .rk-chain-selector {
+	border-radius: 12px !important;
+	border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Close button styling */
+[data-rk] .rk-close-button {
+	border-radius: 50% !important;
+	background: rgba(255, 255, 255, 0.1) !important;
+	border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-rk] .rk-close-button:hover {
+	background: rgba(255, 255, 255, 0.2) !important;
+}
+/* Global cursor styles */
+button,
+[role="button"],
+a {
+	cursor: pointer !important;
+}
+
+/* Ensure all interactive elements have proper cursor */
+.btn,
+.button,
+.connect-button,
+.wallet-button {
+	cursor: pointer !important;
+}
+
+/* Disabled state cursor */
+button:disabled,
+[role="button"]:disabled {
+	cursor: not-allowed !important;
+	opacity: 0.6 !important;
+}
+/* Smooth transitions for sidebar */
+.sidebar-transition {
+	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar-scroll::-webkit-scrollbar {
+	width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.2);
+	border-radius: 2px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.3);
+}
