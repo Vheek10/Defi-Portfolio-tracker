@@ -1,20 +1,15 @@
 /** @format */
 
+// app/dashboard/page.tsx
 "use client";
 
 import { useState } from "react";
-import { EnhancedPortfolioDashboard } from "./EnhancedPortfolioDashboard";
-import { DashboardSidebar } from "./DashboardSidebar";
-import {
-	BarChart3,
-	Wallet,
-	Settings,
-	Coins,
-	Zap,
-	PieChart,
-} from "lucide-react";
+import { EnhancedPortfolioDashboard } from "@/components/EnhancedPortfolioDashboard";
+import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
+import { DashboardSidebar } from "@/components/DashboardSidebar";
+import { Wallet, Settings, Coins, Zap } from "lucide-react";
 
-export function LaunchAppSection() {
+export default function DashboardPage() {
 	const [activeTab, setActiveTab] = useState("portfolio");
 
 	const renderTabContent = () => {
@@ -22,8 +17,7 @@ export function LaunchAppSection() {
 			case "portfolio":
 				return <EnhancedPortfolioDashboard />;
 			case "analytics":
-				// This will now show the analytics view within EnhancedPortfolioDashboard
-				return <EnhancedPortfolioDashboard initialView="analytics" />;
+				return <AnalyticsDashboard />;
 			case "wallet":
 				return (
 					<div className="text-center py-12">
@@ -74,8 +68,8 @@ export function LaunchAppSection() {
 	};
 
 	return (
-		<section className="min-h-screen bg-gradient-to-br from-gray-900 to-black">
-			<div className="flex h-screen">
+		<div className="min-h-screen bg-gradient-to-br from-gray-900 to-black">
+			<div className="flex h-[calc(100vh-80px)]">
 				{/* Sidebar */}
 				<DashboardSidebar
 					activeTab={activeTab}
@@ -84,36 +78,14 @@ export function LaunchAppSection() {
 
 				{/* Main Content */}
 				<div className="flex-1 flex flex-col overflow-hidden">
-					{/* Header */}
+					{/* Header - Completely removed the title and description div */}
 					<header className="bg-gray-900/50 border-b border-gray-700 backdrop-blur-sm">
 						<div className="px-6 py-4">
 							<div className="flex items-center justify-between">
-								<div>
-									<h1 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-										{activeTab === "portfolio" && "Live Portfolio"}
-										{activeTab === "analytics" && "Advanced Analytics"}
-										{activeTab === "wallet" && "Wallet Management"}
-										{activeTab === "earn" && "Earn & Yield"}
-										{activeTab === "settings" && "Settings"}
-									</h1>
-									<p className="text-gray-400 text-sm mt-1">
-										{activeTab === "portfolio" &&
-											"Real-time prices and multi-chain balances"}
-										{activeTab === "analytics" &&
-											"Deep insights and historical data"}
-										{activeTab === "wallet" && "Manage your digital assets"}
-										{activeTab === "earn" && "Discover yield opportunities"}
-										{activeTab === "settings" && "Customize your experience"}
-									</p>
-								</div>
+								{/* Empty div to maintain flex layout */}
+								<div></div>
 
 								{/* Quick Actions */}
-								<div className="flex items-center gap-3">
-									<button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-all duration-300 hover:scale-105 cursor-pointer">
-										<Zap className="h-4 w-4" />
-										<span className="text-sm font-medium">Quick Swap</span>
-									</button>
-								</div>
 							</div>
 						</div>
 					</header>
@@ -124,6 +96,6 @@ export function LaunchAppSection() {
 					</main>
 				</div>
 			</div>
-		</section>
+		</div>
 	);
 }

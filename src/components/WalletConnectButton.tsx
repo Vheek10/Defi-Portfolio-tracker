@@ -14,13 +14,20 @@ export function WalletConnectButton() {
 	return (
 		<ConnectButton.Custom>
 			{({
-				openConnectModal,
-				openAccountModal,
-				mounted,
 				account,
 				chain: connectedChain,
+				openAccountModal,
+				openChainModal,
+				openConnectModal,
+				authenticationStatus,
+				mounted,
 			}) => {
-				const connected = mounted && account && account.address;
+				const ready = mounted && authenticationStatus !== "loading";
+				const connected =
+					ready &&
+					account &&
+					connectedChain &&
+					(!authenticationStatus || authenticationStatus === "authenticated");
 
 				return (
 					<div>
@@ -52,6 +59,17 @@ export function WalletConnectButton() {
 									)}
 								</div>
 
+								{/* Network Switch Button (if wrong network) */}
+								{connectedChain?.unsupported && (
+									<button
+										onClick={openChainModal}
+										className="flex items-center gap-2 bg-red-500/20 border border-red-500 text-red-300 px-3 py-2 rounded-lg hover:bg-red-500/30 transition-all duration-300 text-sm font-medium cursor-pointer"
+										type="button">
+										<div className="w-2 h-2 bg-red-500 rounded-full" />
+										Wrong network
+									</button>
+								)}
+
 								{/* Connected Wallet Button */}
 								<button
 									onClick={openAccountModal}
@@ -64,14 +82,18 @@ export function WalletConnectButton() {
 											style={{
 												backgroundColor:
 													connectedChain?.id === 1
-														? "#3cba54"
+														? "#3cba54" // Ethereum
 														: connectedChain?.id === 137
-														? "#8247e5"
+														? "#8247e5" // Polygon
 														: connectedChain?.id === 42161
-														? "#28a0f0"
+														? "#28a0f0" // Arbitrum
 														: connectedChain?.id === 10
-														? "#ff0420"
-														: "#666",
+														? "#ff0420" // Optimism
+														: connectedChain?.id === 56
+														? "#f0b90b" // BSC
+														: connectedChain?.id === 43114
+														? "#e84142" // Avalanche
+														: "#666", // Default
 											}}
 										/>
 

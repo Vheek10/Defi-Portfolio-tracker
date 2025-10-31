@@ -1,5 +1,6 @@
 /** @format */
 
+// app/page.tsx
 "use client";
 
 import { motion } from "framer-motion";
@@ -13,6 +14,10 @@ import { ArrowRight } from "lucide-react";
 export default function Home() {
 	const router = useRouter();
 
+	const handleLaunchApp = () => {
+		router.push("/dashboard");
+	};
+
 	return (
 		<div className="relative">
 			{/* 3D Background */}
@@ -24,7 +29,7 @@ export default function Home() {
 			<div className="relative z-10">
 				{/* Hero Section */}
 				<section className="relative min-h-screen">
-					<HeroSection />
+					<HeroSection onLaunchApp={handleLaunchApp} />
 				</section>
 
 				{/* Stats Overview */}
@@ -56,7 +61,7 @@ export default function Home() {
 							precision and ease.
 						</motion.p>
 						<motion.button
-							onClick={() => router.push("/app")}
+							onClick={handleLaunchApp}
 							className="group flex items-center gap-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-4 rounded-xl font-semibold text-lg transition-all duration-300 hover:scale-105 cursor-pointer shadow-lg hover:shadow-blue-500/25"
 							initial={{ opacity: 0, scale: 0.9 }}
 							whileInView={{ opacity: 1, scale: 1 }}
