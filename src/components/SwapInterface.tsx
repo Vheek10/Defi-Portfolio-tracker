@@ -1,16 +1,17 @@
 /** @format */
-/** @format */
 
 // components/SwapInterface.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
 	useAccount,
 	useChainId,
 	useChains,
 	useSwitchChain,
 	useBalance,
+	useToken,
+	useReadContract,
 } from "wagmi";
 import {
 	ArrowDownUp,
@@ -20,7 +21,10 @@ import {
 	CheckCircle2,
 	Search,
 	Wallet,
+	ExternalLink,
+	Copy,
 } from "lucide-react";
+import { formatUnits, parseUnits, isAddress, erc20Abi } from "viem";
 import { useAlertManager } from "@/hooks/useAlertManager";
 
 interface Token {
@@ -29,35 +33,130 @@ interface Token {
 	balance: string;
 	price: number;
 	logo?: string;
-	address?: string;
-	id?: string;
+	address: string;
+	decimals: number;
+	chainId: number;
+	coinGeckoId?: string;
 }
 
 interface SwapInterfaceProps {
 	onClose?: () => void;
 }
 
-const POPULAR_TOKENS: Token[] = [
-	{ symbol: "ETH", name: "Ethereum", balance: "0", price: 2800 },
-	{ symbol: "USDC", name: "USD Coin", balance: "0", price: 1 },
-	{ symbol: "USDT", name: "Tether", balance: "0", price: 1 },
-	{ symbol: "DAI", name: "Dai Stablecoin", balance: "0", price: 1 },
-	{ symbol: "WBTC", name: "Wrapped Bitcoin", balance: "0", price: 42000 },
-	{ symbol: "MATIC", name: "Polygon", balance: "0", price: 0.8 },
-];
+// Common ERC20 token addresses by chain with CoinGecko IDs
+const COMMON_TOKENS: { [chainId: number]: Token[] } = {
+	1: [
+		// Ethereum Mainnet
+		{
+			symbol: "ETH",
+			name: "Ethereum",
+			balance: "0",
+			price: 0,
+			address: "0x0000000000000000000000000000000000000000",
+			decimals: 18,
+			chainId: 1,
+			coinGeckoId: "ethereum",
+		},
+		{
+			symbol: "USDC",
+			name: "USD Coin",
+			balance: "0",
+			price: 1,
+			address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+			decimals: 6,
+			chainId: 1,
+			coinGeckoId: "usd-coin",
+		},
+		{
+			symbol: "USDT",
+			name: "Tether",
+			balance: "0",
+			price: 1,
+			address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+			decimals: 6,
+			chainId: 1,
+			coinGeckoId: "tether",
+		},
+		{
+			symbol: "DAI",
+			name: "Dai Stablecoin",
+			balance: "0",
+			price: 1,
+			address: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+			decimals: 18,
+			chainId: 1,
+			coinGeckoId: "dai",
+		},
+		{
+			symbol: "WBTC",
+			name: "Wrapped Bitcoin",
+			balance: "0",
+			price: 0,
+			address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+			decimals: 8,
+			chainId: 1,
+			coinGeckoId: "wrapped-bitcoin",
+		},
+	],
+	137: [
+		// Polygon
+		{
+			symbol: "MATIC",
+			name: "Polygon",
+			balance: "0",
+			price: 0,
+			address: "0x0000000000000000000000000000000000000000",
+			decimals: 18,
+			chainId: 137,
+			coinGeckoId: "matic-network",
+		},
+		{
+			symbol: "USDC",
+			name: "USD Coin",
+			balance: "0",
+			price: 1,
+			address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+			decimals: 6,
+			chainId: 137,
+			coinGeckoId: "usd-coin",
+		},
+	],
+	42161: [
+		// Arbitrum
+		{
+			symbol: "ETH",
+			name: "Ethereum",
+			balance: "0",
+			price: 0,
+			address: "0x0000000000000000000000000000000000000000",
+			decimals: 18,
+			chainId: 42161,
+			coinGeckoId: "ethereum",
+		},
+		{
+			symbol: "USDC",
+			name: "USD Coin",
+			balance: "0",
+			price: 1,
+			address: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+			decimals: 6,
+			chainId: 42161,
+			coinGeckoId: "usd-coin",
+		},
+	],
+};
 
 export function SwapInterface({ onClose }: SwapInterfaceProps) {
-	// All hooks must be called unconditionally at the top level
 	const { address, isConnected } = useAccount();
 	const chainId = useChainId();
 	const chains = useChains();
 	const { switchChain } = useSwitchChain();
-	const { data: ethBalance } = useBalance({ address });
+	const { data: nativeBalance } = useBalance({ address });
 	const alertManager = useAlertManager();
 
 	const [mounted, setMounted] = useState(false);
-	const [fromToken, setFromToken] = useState<Token>(POPULAR_TOKENS[0]);
-	const [toToken, setToToken] = useState<Token>(POPULAR_TOKENS[1]);
+	const [fromToken, setFromToken] = useState<Token | null>(null);
+	const [toToken, setToToken] = useState<Token | null>(null);
 	const [fromAmount, setFromAmount] = useState("");
 	const [toAmount, setToAmount] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
@@ -68,55 +167,125 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [searchResults, setSearchResults] = useState<Token[]>([]);
 	const [isSearching, setIsSearching] = useState(false);
+	const [tokenPrices, setTokenPrices] = useState<{ [symbol: string]: number }>(
+		{},
+	);
+	const [allTokens, setAllTokens] = useState<Token[]>([]);
 
-	// Get current chain name - this is computed value, not a hook
 	const currentChain = chains.find((chain) => chain.id === chainId);
+	const chainTokens = COMMON_TOKENS[chainId] || COMMON_TOKENS[1];
 
-	// All useEffect hooks must be called unconditionally
+	// Get token data for from token
+	const { data: fromTokenData } = useToken({
+		address: fromToken?.address as `0x${string}`,
+		enabled:
+			!!fromToken &&
+			fromToken.address !== "0x0000000000000000000000000000000000000000",
+	});
+
+	// Get token balance for from token using readContract
+	const { data: fromTokenBalance, refetch: refetchFromBalance } =
+		useReadContract({
+			address: fromToken?.address as `0x${string}`,
+			abi: erc20Abi,
+			functionName: "balanceOf",
+			args: address ? [address] : undefined,
+			enabled:
+				!!fromToken &&
+				!!address &&
+				fromToken.address !== "0x0000000000000000000000000000000000000000",
+		});
+
+	// Get token data for to token
+	const { data: toTokenData } = useToken({
+		address: toToken?.address as `0x${string}`,
+		enabled:
+			!!toToken &&
+			toToken.address !== "0x0000000000000000000000000000000000000000",
+	});
+
+	// Get token balance for to token using readContract
+	const { data: toTokenBalance, refetch: refetchToBalance } = useReadContract({
+		address: toToken?.address as `0x${string}`,
+		abi: erc20Abi,
+		functionName: "balanceOf",
+		args: address ? [address] : undefined,
+		enabled:
+			!!toToken &&
+			!!address &&
+			toToken.address !== "0x0000000000000000000000000000000000000000",
+	});
+
 	useEffect(() => {
 		setMounted(true);
 	}, []);
 
-	// Update token balances with real data
+	// Initialize tokens for current chain
 	useEffect(() => {
-		if (ethBalance && isConnected) {
-			const updatedTokens = POPULAR_TOKENS.map((token) => {
-				if (token.symbol === "ETH") {
-					return {
-						...token,
-						balance: parseFloat(ethBalance.formatted).toFixed(4),
-					};
-				}
-				// For demo purposes, set some mock balances for other tokens
-				if (token.symbol === "USDC") {
-					return { ...token, balance: "1250.75" };
-				}
-				if (token.symbol === "USDT") {
-					return { ...token, balance: "500.25" };
-				}
-				return token;
-			});
-			setFromToken(updatedTokens[0]);
-			setToToken(updatedTokens[1]);
+		if (chainTokens.length > 0) {
+			setFromToken(chainTokens[0]);
+			setToToken(chainTokens[1]);
+			setAllTokens(chainTokens);
 		}
-	}, [ethBalance, isConnected]);
+	}, [chainId, chainTokens]);
 
-	// Update to amount when from amount changes
-	useEffect(() => {
-		if (fromAmount && parseFloat(fromAmount) > 0 && fromToken && toToken) {
-			const fromValue = parseFloat(fromAmount) * fromToken.price;
-			const calculatedAmount = (fromValue / toToken.price).toFixed(6);
-			setToAmount(calculatedAmount);
-		} else {
-			setToAmount("");
+	// Fetch token prices from CoinGecko
+	const fetchTokenPrices = useCallback(async () => {
+		if (!allTokens.length) return;
+
+		try {
+			// Get unique CoinGecko IDs
+			const coinGeckoIds = allTokens
+				.map((token) => token.coinGeckoId)
+				.filter(Boolean)
+				.join(",");
+
+			if (!coinGeckoIds) return;
+
+			const response = await fetch(
+				`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoIds}&vs_currencies=usd`,
+			);
+
+			if (!response.ok) {
+				throw new Error("Failed to fetch prices");
+			}
+
+			const prices = await response.json();
+
+			// Update token prices
+			const newTokenPrices: { [symbol: string]: number } = {};
+			allTokens.forEach((token) => {
+				if (token.coinGeckoId && prices[token.coinGeckoId]) {
+					newTokenPrices[token.symbol] = prices[token.coinGeckoId].usd;
+				}
+			});
+
+			setTokenPrices(newTokenPrices);
+		} catch (error) {
+			console.error("Error fetching token prices:", error);
+			alertManager.addAlert({
+				type: "price",
+				title: "Price Update Failed",
+				message: "Unable to fetch latest token prices",
+				severity: "warning",
+				triggered: false,
+				active: true,
+			});
 		}
-	}, [fromAmount, fromToken, toToken]);
+	}, [allTokens, alertManager]);
+
+	// Fetch prices on mount and periodically
+	useEffect(() => {
+		fetchTokenPrices();
+		const interval = setInterval(fetchTokenPrices, 30000); // Update every 30 seconds
+		return () => clearInterval(interval);
+	}, [fetchTokenPrices]);
 
 	// Search tokens from CoinGecko
-	useEffect(() => {
-		const searchTokens = async () => {
-			if (!searchQuery.trim()) {
-				setSearchResults([]);
+	const searchCoinGeckoTokens = useCallback(
+		async (query: string) => {
+			if (!query.trim()) {
+				setSearchResults(allTokens);
 				return;
 			}
 
@@ -124,70 +293,140 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 			try {
 				const response = await fetch(
 					`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(
-						searchQuery,
+						query,
 					)}`,
 				);
 
 				if (!response.ok) {
-					throw new Error("Failed to fetch tokens");
+					throw new Error("Failed to fetch tokens from CoinGecko");
 				}
 
 				const data = await response.json();
 
 				// Transform CoinGecko data to our Token format
-				const tokens: Token[] = data.coins.slice(0, 20).map((coin: any) => ({
-					symbol: coin.symbol.toUpperCase(),
-					name: coin.name,
-					balance: "0", // Default balance
-					price: 0, // We'll fetch price separately if needed
-					logo: coin.thumb,
-					id: coin.id,
-				}));
+				const coinGeckoTokens: Token[] = data.coins
+					.slice(0, 10)
+					.map((coin: any) => ({
+						symbol: coin.symbol.toUpperCase(),
+						name: coin.name,
+						balance: "0",
+						price: 0,
+						logo: coin.thumb,
+						address: "0x0000000000000000000000000000000000000000", // Will need to map to actual address
+						decimals: 18,
+						chainId: chainId,
+						coinGeckoId: coin.id,
+					}));
 
-				setSearchResults(tokens);
+				// Combine with local tokens that match the search
+				const localResults = allTokens.filter(
+					(token) =>
+						token.symbol.toLowerCase().includes(query.toLowerCase()) ||
+						token.name.toLowerCase().includes(query.toLowerCase()),
+				);
+
+				setSearchResults([...localResults, ...coinGeckoTokens]);
 			} catch (error) {
-				console.error("Error searching tokens:", error);
-				alertManager.addAlert({
-					type: "price",
-					title: "Search Failed",
-					message: "Failed to fetch tokens from CoinGecko",
-					severity: "warning",
-					triggered: false,
-					active: true,
-					data: { error: "Search failed" },
-				});
-				setSearchResults([]);
+				console.error("Error searching CoinGecko tokens:", error);
+				// Fallback to local search
+				const localResults = allTokens.filter(
+					(token) =>
+						token.symbol.toLowerCase().includes(query.toLowerCase()) ||
+						token.name.toLowerCase().includes(query.toLowerCase()),
+				);
+				setSearchResults(localResults);
 			} finally {
 				setIsSearching(false);
 			}
-		};
+		},
+		[allTokens, chainId],
+	);
 
-		// Debounce search
-		const timeoutId = setTimeout(searchTokens, 500);
-		return () => clearTimeout(timeoutId);
-	}, [searchQuery, alertManager]);
-
-	// Fetch token price when a token is selected from search
-	const fetchTokenPrice = async (tokenId: string): Promise<number> => {
-		try {
-			const response = await fetch(
-				`https://api.coingecko.com/api/v3/simple/price?ids=${tokenId}&vs_currencies=usd`,
-			);
-
-			if (!response.ok) {
-				throw new Error("Failed to fetch price");
+	// Update token balances with real data
+	useEffect(() => {
+		if (fromToken && address) {
+			let balance = "0";
+			if (fromToken.address === "0x0000000000000000000000000000000000000000") {
+				// Native token
+				balance = nativeBalance
+					? formatUnits(nativeBalance.value, nativeBalance.decimals)
+					: "0";
+			} else if (fromTokenBalance) {
+				const decimals = fromTokenData?.decimals || fromToken.decimals;
+				balance = formatUnits(fromTokenBalance as bigint, decimals);
 			}
 
-			const data = await response.json();
-			return data[tokenId]?.usd || 0;
-		} catch (error) {
-			console.error("Error fetching token price:", error);
-			return 0;
+			setFromToken((prev) => (prev ? { ...prev, balance } : null));
 		}
-	};
+	}, [fromToken, fromTokenBalance, fromTokenData, nativeBalance, address]);
+
+	useEffect(() => {
+		if (toToken && address) {
+			let balance = "0";
+			if (toToken.address === "0x0000000000000000000000000000000000000000") {
+				// Native token
+				balance = nativeBalance
+					? formatUnits(nativeBalance.value, nativeBalance.decimals)
+					: "0";
+			} else if (toTokenBalance) {
+				const decimals = toTokenData?.decimals || toToken.decimals;
+				balance = formatUnits(toTokenBalance as bigint, decimals);
+			}
+
+			setToToken((prev) => (prev ? { ...prev, balance } : null));
+		}
+	}, [toToken, toTokenBalance, toTokenData, nativeBalance, address]);
+
+	// Update token prices
+	useEffect(() => {
+		if (fromToken && tokenPrices[fromToken.symbol]) {
+			setFromToken((prev) =>
+				prev ? { ...prev, price: tokenPrices[fromToken.symbol] } : null,
+			);
+		}
+	}, [fromToken, tokenPrices]);
+
+	useEffect(() => {
+		if (toToken && tokenPrices[toToken.symbol]) {
+			setToToken((prev) =>
+				prev ? { ...prev, price: tokenPrices[toToken.symbol] } : null,
+			);
+		}
+	}, [toToken, tokenPrices]);
+
+	// Calculate to amount based on from amount and prices
+	useEffect(() => {
+		if (
+			fromAmount &&
+			parseFloat(fromAmount) > 0 &&
+			fromToken &&
+			toToken &&
+			fromToken.price > 0
+		) {
+			const fromValue = parseFloat(fromAmount) * fromToken.price;
+			const calculatedAmount =
+				fromToken.price > 0 ? (fromValue / toToken.price).toFixed(6) : "0";
+			setToAmount(calculatedAmount);
+		} else {
+			setToAmount("");
+		}
+	}, [fromAmount, fromToken, toToken]);
+
+	// Search tokens
+	useEffect(() => {
+		const timeoutId = setTimeout(() => {
+			if (searchQuery.trim()) {
+				searchCoinGeckoTokens(searchQuery);
+			} else {
+				setSearchResults(allTokens);
+			}
+		}, 500);
+
+		return () => clearTimeout(timeoutId);
+	}, [searchQuery, searchCoinGeckoTokens, allTokens]);
 
 	const handleSwap = async () => {
-		if (!isConnected) {
+		if (!isConnected || !fromToken || !toToken) {
 			alertManager.addAlert({
 				type: "security",
 				title: "Wallet Not Connected",
@@ -200,7 +439,20 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 			return;
 		}
 
-		if (parseFloat(fromAmount) > parseFloat(fromToken.balance)) {
+		if (!fromAmount || parseFloat(fromAmount) <= 0) {
+			alertManager.addAlert({
+				type: "security",
+				title: "Invalid Amount",
+				message: "Please enter a valid amount to swap",
+				severity: "warning",
+				triggered: false,
+				active: true,
+			});
+			return;
+		}
+
+		const fromBalance = parseFloat(fromToken.balance);
+		if (parseFloat(fromAmount) > fromBalance) {
 			alertManager.addAlert({
 				type: "security",
 				title: "Insufficient Balance",
@@ -215,7 +467,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 
 		setIsLoading(true);
 		try {
-			// Simulate swap process
+			// Simulate swap process - in real implementation, you'd interact with a DEX
 			await new Promise((resolve) => setTimeout(resolve, 3000));
 
 			alertManager.addAlert({
@@ -232,6 +484,10 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 					value: toAmount,
 				},
 			});
+
+			// Refresh balances
+			refetchFromBalance();
+			refetchToBalance();
 
 			// Reset form
 			setFromAmount("");
@@ -253,7 +509,8 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 	};
 
 	const handleTokenSwap = () => {
-		// Swap the tokens
+		if (!fromToken || !toToken) return;
+
 		const tempFrom = fromToken;
 		const tempAmount = fromAmount;
 		setFromToken(toToken);
@@ -263,18 +520,17 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 	};
 
 	const handleMaxClick = () => {
-		if (fromToken.balance) {
-			setFromAmount(fromToken.balance);
+		if (fromToken?.balance) {
+			// Leave a little for gas if it's native token
+			const maxAmount =
+				fromToken.address === "0x0000000000000000000000000000000000000000"
+					? Math.max(0, parseFloat(fromToken.balance) - 0.001).toString()
+					: fromToken.balance;
+			setFromAmount(maxAmount);
 		}
 	};
 
-	const handleTokenSelect = async (token: Token) => {
-		// If it's a CoinGecko token, fetch its price
-		if (token.id && token.price === 0) {
-			const price = await fetchTokenPrice(token.id);
-			token.price = price;
-		}
-
+	const handleTokenSelect = (token: Token) => {
 		if (showTokenSelector === "from") {
 			setFromToken(token);
 		} else {
@@ -286,10 +542,16 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 		setSearchResults([]);
 	};
 
-	const displayTokens = searchQuery.trim() ? searchResults : POPULAR_TOKENS;
+	const getTokenDisplayBalance = (token: Token) => {
+		const balance = parseFloat(token.balance);
+		if (balance === 0) return "0";
+		if (balance < 0.0001) return "< 0.0001";
+		return balance.toFixed(4);
+	};
 
 	const TokenSelector = ({ type }: { type: "from" | "to" }) => {
 		const currentToken = type === "from" ? fromToken : toToken;
+		const displayTokens = searchQuery.trim() ? searchResults : allTokens;
 
 		return (
 			<div className="relative">
@@ -297,7 +559,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 					onClick={() => setShowTokenSelector(type)}
 					className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 rounded-lg px-3 py-2 min-w-[120px] transition-colors cursor-pointer border border-gray-600 justify-between">
 					<div className="flex items-center gap-2">
-						{currentToken.logo ? (
+						{currentToken?.logo ? (
 							<img
 								src={currentToken.logo}
 								alt={currentToken.symbol}
@@ -306,46 +568,51 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 						) : (
 							<div
 								className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-									currentToken.symbol === "ETH"
+									currentToken?.symbol === "ETH"
 										? "bg-gradient-to-br from-blue-500 to-purple-500"
-										: currentToken.symbol === "USDC"
+										: currentToken?.symbol === "USDC"
 										? "bg-gradient-to-br from-green-500 to-blue-500"
-										: currentToken.symbol === "USDT"
+										: currentToken?.symbol === "USDT"
 										? "bg-gradient-to-br from-blue-400 to-green-400"
-										: currentToken.symbol === "DAI"
+										: currentToken?.symbol === "DAI"
 										? "bg-gradient-to-br from-yellow-500 to-orange-500"
-										: currentToken.symbol === "WBTC"
+										: currentToken?.symbol === "WBTC"
 										? "bg-gradient-to-br from-orange-500 to-yellow-500"
-										: "bg-gradient-to-br from-purple-500 to-pink-500"
+										: currentToken?.symbol === "MATIC"
+										? "bg-gradient-to-br from-purple-500 to-pink-500"
+										: "bg-gradient-to-br from-gray-500 to-gray-700"
 								}`}>
-								{currentToken.symbol.slice(0, 3)}
+								{currentToken?.symbol.slice(0, 3)}
 							</div>
 						)}
 						<span className="text-white font-medium">
-							{currentToken.symbol}
+							{currentToken?.symbol}
 						</span>
 					</div>
 					<ArrowDownUp className="h-3 w-3 text-gray-400 flex-shrink-0" />
 				</button>
 
 				{showTokenSelector === type && (
-					<div className="absolute top-12 left-0 w-72 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 max-h-80 overflow-y-auto">
+					<div className="absolute top-12 left-0 w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 max-h-96 overflow-y-auto">
 						<div className="p-3 border-b border-gray-700">
-							<div className="relative">
+							<div className="relative mb-2">
 								<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
 								<input
 									type="text"
-									placeholder="Search tokens..."
+									placeholder="Search by symbol, name, or address..."
 									value={searchQuery}
 									onChange={(e) => setSearchQuery(e.target.value)}
 									className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-10 pr-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 text-sm"
 								/>
 							</div>
+							<div className="text-xs text-gray-400">
+								Chain: {currentChain?.name} (ID: {chainId})
+							</div>
 						</div>
 
 						<div className="p-2">
 							<div className="text-xs text-gray-400 font-medium mb-2 px-2">
-								{searchQuery.trim() ? "Search Results" : "Popular Tokens"}
+								{searchQuery.trim() ? "Search Results" : "Available Tokens"}
 							</div>
 
 							{isSearching ? (
@@ -357,10 +624,10 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 									No tokens found
 								</div>
 							) : (
-								<div className="space-y-1">
-									{displayTokens.map((token) => (
+								<div className="space-y-1 max-h-64 overflow-y-auto">
+									{displayTokens.map((token, index) => (
 										<button
-											key={token.id || token.symbol}
+											key={`${token.symbol}-${index}`}
 											onClick={() => handleTokenSelect(token)}
 											className="flex items-center justify-between w-full p-3 rounded-lg hover:bg-gray-800 transition-colors cursor-pointer group">
 											<div className="flex items-center gap-3">
@@ -383,7 +650,9 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 																? "bg-gradient-to-br from-yellow-500 to-orange-500"
 																: token.symbol === "WBTC"
 																? "bg-gradient-to-br from-orange-500 to-yellow-500"
-																: "bg-gradient-to-br from-purple-500 to-pink-500"
+																: token.symbol === "MATIC"
+																? "bg-gradient-to-br from-purple-500 to-pink-500"
+																: "bg-gradient-to-br from-gray-500 to-gray-700"
 														}`}>
 														{token.symbol.slice(0, 3)}
 													</div>
@@ -399,11 +668,14 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 											</div>
 											<div className="text-right">
 												<div className="text-white text-sm font-medium">
-													{token.balance}
+													{getTokenDisplayBalance(token)}
 												</div>
 												<div className="text-gray-400 text-xs">
 													{token.price > 0
-														? `$${token.price.toLocaleString()}`
+														? `$${token.price.toLocaleString(undefined, {
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+														  })}`
 														: "Price loading..."}
 												</div>
 											</div>
@@ -418,7 +690,6 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 		);
 	};
 
-	// Show loading state during SSR - this is just JSX, not hooks
 	if (!mounted) {
 		return (
 			<div className="bg-gray-900/50 border border-gray-700 rounded-2xl p-6 backdrop-blur-sm max-w-md mx-auto animate-pulse">
@@ -432,8 +703,21 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 		);
 	}
 
+	if (!fromToken || !toToken) {
+		return (
+			<div className="bg-gray-900/50 border border-gray-700 rounded-2xl p-6 backdrop-blur-sm max-w-md mx-auto">
+				<div className="text-center text-gray-400">
+					<Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+					<p>Loading tokens...</p>
+				</div>
+			</div>
+		);
+	}
+
 	const exchangeRate =
-		fromToken && toToken ? toToken.price / fromToken.price : 0;
+		fromToken.price > 0 ? toToken.price / fromToken.price : 0;
+	const insufficientBalance =
+		parseFloat(fromAmount) > parseFloat(fromToken.balance);
 
 	return (
 		<div className="bg-gray-900/50 border border-gray-700 rounded-2xl p-6 backdrop-blur-sm max-w-md w-full mx-4">
@@ -465,6 +749,9 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 							Connected to {currentChain?.name || "Unknown Network"}
 						</span>
 					</div>
+					<div className="text-xs text-green-400 mt-1">
+						{address?.slice(0, 6)}...{address?.slice(-4)}
+					</div>
 				</div>
 			)}
 
@@ -474,7 +761,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 					<label className="text-gray-400 text-sm font-medium">From</label>
 					<div className="flex items-center gap-2">
 						<span className="text-gray-400 text-sm">
-							Balance: {fromToken.balance}
+							Balance: {getTokenDisplayBalance(fromToken)}
 						</span>
 						<button
 							onClick={handleMaxClick}
@@ -490,10 +777,11 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 						value={fromAmount}
 						onChange={(e) => setFromAmount(e.target.value)}
 						className="flex-1 bg-transparent text-2xl font-bold text-white placeholder-gray-500 focus:outline-none min-w-0"
+						step="any"
 					/>
 					<TokenSelector type="from" />
 				</div>
-				{fromAmount && parseFloat(fromAmount) > 0 && (
+				{fromAmount && parseFloat(fromAmount) > 0 && fromToken.price > 0 && (
 					<div className="text-gray-400 text-xs mt-2">
 						≈ $
 						{(parseFloat(fromAmount) * fromToken.price).toLocaleString(
@@ -521,7 +809,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 				<div className="flex items-center justify-between mb-2">
 					<label className="text-gray-400 text-sm font-medium">To</label>
 					<span className="text-gray-400 text-sm">
-						Balance: {toToken.balance}
+						Balance: {getTokenDisplayBalance(toToken)}
 					</span>
 				</div>
 				<div className="flex items-center gap-3">
@@ -534,7 +822,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 					/>
 					<TokenSelector type="to" />
 				</div>
-				{toAmount && parseFloat(toAmount) > 0 && (
+				{toAmount && parseFloat(toAmount) > 0 && toToken.price > 0 && (
 					<div className="text-gray-400 text-xs mt-2">
 						≈ $
 						{(parseFloat(toAmount) * toToken.price).toLocaleString(undefined, {
@@ -546,7 +834,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 			</div>
 
 			{/* Swap Details */}
-			{fromAmount && parseFloat(fromAmount) > 0 && (
+			{fromAmount && parseFloat(fromAmount) > 0 && fromToken.price > 0 && (
 				<div className="bg-gray-800/30 border border-gray-700 rounded-xl p-4 mb-4 space-y-3">
 					<div className="flex items-center justify-between">
 						<span className="text-gray-400 text-sm">Exchange Rate</span>
@@ -574,7 +862,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 					</div>
 					<div className="flex items-center justify-between">
 						<span className="text-gray-400 text-sm">Network Fee</span>
-						<span className="text-white text-sm font-medium">$2.50</span>
+						<span className="text-white text-sm font-medium">~$2.50</span>
 					</div>
 				</div>
 			)}
@@ -625,7 +913,9 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 					parseFloat(fromAmount) <= 0 ||
 					isLoading ||
 					!isConnected ||
-					parseFloat(fromAmount) > parseFloat(fromToken.balance)
+					insufficientBalance ||
+					!fromToken ||
+					!toToken
 				}
 				className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold py-4 rounded-xl transition-all duration-300 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-[1.02] disabled:transform-none">
 				{isLoading ? (
@@ -638,7 +928,7 @@ export function SwapInterface({ onClose }: SwapInterfaceProps) {
 						<Wallet className="h-5 w-5" />
 						Connect Wallet to Swap
 					</>
-				) : parseFloat(fromAmount) > parseFloat(fromToken.balance) ? (
+				) : insufficientBalance ? (
 					"Insufficient Balance"
 				) : !fromAmount ? (
 					"Enter Amount"
