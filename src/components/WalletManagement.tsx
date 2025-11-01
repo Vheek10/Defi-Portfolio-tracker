@@ -20,7 +20,7 @@ import {
 	ExternalLink,
 	LogOut,
 	Shield,
-	Gauge, // CHANGED: Using Gauge instead of GasPump
+	GasPump,
 	Clock,
 	ArrowUpRight,
 	ArrowDownLeft,
@@ -233,7 +233,7 @@ export function WalletManagement() {
 				{[
 					{ id: "overview", label: "Overview", icon: Wallet },
 					{ id: "transactions", label: "Transactions", icon: History },
-					{ id: "gas", label: "Gas Optimizer", icon: Gauge }, // CHANGED: Using Gauge icon
+					{ id: "gas", label: "Gas Optimizer", icon: GasPump },
 					{ id: "multiwallet", label: "Multi-Wallet", icon: Users },
 				].map((tab) => {
 					const Icon = tab.icon;
