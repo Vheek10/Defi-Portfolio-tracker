@@ -20,15 +20,16 @@ import {
 	ExternalLink,
 	LogOut,
 	Shield,
-	Gauge, // CHANGED: Using Gauge instead of GasPump
-	Clock,
+	Gauge,
 	ArrowUpRight,
 	ArrowDownLeft,
 	CheckCircle2,
 	XCircle,
 	AlertTriangle,
+	RefreshCw,
 } from "lucide-react";
-import { formatEther, formatUnits } from "viem";
+import { formatEther } from "viem";
+import { usePreferences, usePrivacy } from "@/contexts/SettingsContext";
 
 interface Transaction {
 	hash: string;
@@ -52,9 +53,12 @@ interface GasPrice {
 
 interface WalletSession {
 	address: string;
-	connector: any;
+	connectorName: string;
 	timestamp: number;
+	network: string;
 }
+
+const ETHERSCAN_API_KEY = "6BXEEN332X3RJ1K9IBXUT8UJDZ8Z2M4HPZ";
 
 export function WalletManagement() {
 	const { address, isConnected, connector } = useAccount();
@@ -62,6 +66,9 @@ export function WalletManagement() {
 	const chainId = useChainId();
 	const { disconnect } = useDisconnect();
 	const { connect, connectors } = useConnect();
+
+	const { showTestnets, refreshRate } = usePreferences();
+	const { hideBalances } = usePrivacy();
 
 	const [activeTab, setActiveTab] = useState<
 		"overview" | "transactions" | "gas" | "multiwallet"
@@ -71,40 +78,100 @@ export function WalletManagement() {
 	const [walletSessions, setWalletSessions] = useState<WalletSession[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [copiedAddress, setCopiedAddress] = useState(false);
+	const [ethPrice, setEthPrice] = useState<number>(0);
+	const [isInitialized, setIsInitialized] = useState(false);
+	const [transactionError, setTransactionError] = useState<string | null>(null);
 
-	// Fetch transaction history
+	// Format currency based on settings
+	const formatCurrency = (amount: number) => {
+		if (hideBalances) return "••••";
+
+		const formatter = new Intl.NumberFormat("en-US", {
+			style: "currency",
+			currency: "USD",
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
+		});
+
+		return formatter.format(amount);
+	};
+
+	// Initialize component after mount
 	useEffect(() => {
-		if (!address) return;
+		const timer = setTimeout(() => {
+			setIsInitialized(true);
+		}, 100);
+		return () => clearTimeout(timer);
+	}, []);
 
-		const fetchTransactions = async () => {
-			setLoading(true);
+	// Fetch current ETH price
+	useEffect(() => {
+		if (!isInitialized) return;
+
+		const fetchEthPrice = async () => {
 			try {
-				// Using Etherscan API (you'll need to replace with your API key)
 				const response = await fetch(
-					`https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=YOUR_ETHERSCAN_API_KEY`,
+					`https://api.etherscan.io/api?module=stats&action=ethprice&apikey=${ETHERSCAN_API_KEY}`,
 				);
 				const data = await response.json();
 				if (data.status === "1") {
-					setTransactions(data.result.slice(0, 20)); // Last 20 transactions
+					setEthPrice(parseFloat(data.result.ethusd));
+				}
+			} catch (error) {
+				console.error("Error fetching ETH price:", error);
+			}
+		};
+
+		fetchEthPrice();
+		const interval = setInterval(fetchEthPrice, refreshRate * 1000);
+		return () => clearInterval(interval);
+	}, [isInitialized, refreshRate]);
+
+	// Fetch transaction history
+	useEffect(() => {
+		if (!address || !isInitialized) return;
+
+		const fetchTransactions = async () => {
+			setLoading(true);
+			setTransactionError(null);
+			try {
+				const baseUrl = getExplorerApiUrl(chainId);
+				const response = await fetch(
+					`${baseUrl}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${ETHERSCAN_API_KEY}`,
+				);
+				const data = await response.json();
+
+				if (data.status === "1") {
+					setTransactions(data.result.slice(0, 20));
+				} else {
+					console.warn("No transactions found:", data.message);
+					setTransactionError(
+						data.message || "No transactions found for this address",
+					);
+					setTransactions([]);
 				}
 			} catch (error) {
 				console.error("Error fetching transactions:", error);
-				// Fallback to mock data for demo
-				setTransactions(generateMockTransactions(address));
+				setTransactionError(
+					"Failed to load transactions. Please try again later.",
+				);
+				setTransactions([]);
 			} finally {
 				setLoading(false);
 			}
 		};
 
 		fetchTransactions();
-	}, [address]);
+	}, [address, chainId, isInitialized]);
 
-	// Fetch gas prices
+	// Fetch gas prices with multiple fallback sources
 	useEffect(() => {
+		if (!isInitialized) return;
+
 		const fetchGasPrices = async () => {
 			try {
 				const response = await fetch(
-					"https://api.etherscan.io/api?module=gastracker&action=gasoracle",
+					`https://api.etherscan.io/api?module=gastracker&action=gasoracle&apikey=${ETHERSCAN_API_KEY}`,
 				);
 				const data = await response.json();
 				if (data.status === "1") {
@@ -115,32 +182,88 @@ export function WalletManagement() {
 						fastest: parseFloat(data.result.FastGasPrice) + 5,
 						baseFee: parseFloat(data.result.suggestBaseFee || "20"),
 					});
+					return;
 				}
 			} catch (error) {
 				console.error("Error fetching gas prices:", error);
-				// Fallback gas prices
-				setGasPrices({
-					safeLow: 25,
-					standard: 30,
-					fast: 35,
-					fastest: 40,
-					baseFee: 20,
-				});
 			}
 		};
 
 		fetchGasPrices();
-		const interval = setInterval(fetchGasPrices, 30000); // Update every 30 seconds
+		const interval = setInterval(fetchGasPrices, refreshRate * 1000);
 		return () => clearInterval(interval);
-	}, []);
+	}, [isInitialized, refreshRate]);
 
 	// Load wallet sessions from localStorage
 	useEffect(() => {
-		const savedSessions = localStorage.getItem("walletSessions");
-		if (savedSessions) {
-			setWalletSessions(JSON.parse(savedSessions));
+		if (!isInitialized) return;
+
+		try {
+			const savedSessions = localStorage.getItem("walletSessions");
+			if (savedSessions) {
+				setWalletSessions(JSON.parse(savedSessions));
+			}
+		} catch (error) {
+			console.error("Error loading wallet sessions:", error);
 		}
-	}, []);
+	}, [isInitialized]);
+
+	// Auto-save wallet session when connected
+	useEffect(() => {
+		if (!isInitialized || !isConnected || !address || !connector) return;
+
+		const networkName = getNetworkName(chainId, showTestnets);
+		const newSession: WalletSession = {
+			address,
+			connectorName: connector.name,
+			timestamp: Date.now(),
+			network: networkName,
+		};
+		addWalletSession(newSession);
+	}, [isConnected, address, connector, chainId, isInitialized, showTestnets]);
+
+	const getNetworkName = (
+		chainId: number,
+		includeTestnets: boolean,
+	): string => {
+		const networks: { [key: number]: string } = {
+			1: "Ethereum Mainnet",
+			137: "Polygon",
+			42161: "Arbitrum",
+			10: "Optimism",
+			56: "BNB Smart Chain",
+			43114: "Avalanche",
+			8453: "Base",
+		};
+
+		if (includeTestnets) {
+			networks[11155111] = "Sepolia Testnet";
+			networks[5] = "Goerli Testnet";
+			networks[80001] = "Polygon Mumbai";
+		}
+
+		return networks[chainId] || `Chain ${chainId}`;
+	};
+
+	const getExplorerApiUrl = (chainId: number): string => {
+		const explorers: { [key: number]: string } = {
+			1: "https://api.etherscan.io/api",
+			137: "https://api.polygonscan.com/api",
+			42161: "https://api.arbiscan.io/api",
+			10: "https://api-optimistic.etherscan.io/api",
+			56: "https://api.bscscan.com/api",
+			43114: "https://api.snowtrace.io/api",
+			8453: "https://api.basescan.org/api",
+		};
+
+		if (showTestnets) {
+			explorers[11155111] = "https://api-sepolia.etherscan.io/api";
+			explorers[5] = "https://api-goerli.etherscan.io/api";
+			explorers[80001] = "https://api-testnet.polygonscan.com/api";
+		}
+
+		return explorers[chainId] || "https://api.etherscan.io/api";
+	};
 
 	const copyAddress = () => {
 		if (address) {
@@ -176,8 +299,17 @@ export function WalletManagement() {
 	};
 
 	const formatTransactionValue = (value: string) => {
-		const ethValue = parseFloat(formatEther(BigInt(value)));
-		return ethValue > 0 ? `${ethValue.toFixed(4)} ETH` : "Contract Interaction";
+		if (hideBalances) return "•••• ETH";
+
+		try {
+			const ethValue = parseFloat(formatEther(BigInt(value)));
+			if (ethValue > 0) {
+				return `${ethValue.toFixed(6)} ETH`;
+			}
+			return "Contract Interaction";
+		} catch {
+			return "Contract Interaction";
+		}
 	};
 
 	const getExplorerUrl = (hash: string) => {
@@ -186,7 +318,17 @@ export function WalletManagement() {
 			137: "https://polygonscan.com/tx/",
 			42161: "https://arbiscan.io/tx/",
 			10: "https://optimistic.etherscan.io/tx/",
+			56: "https://bscscan.com/tx/",
+			43114: "https://snowtrace.io/tx/",
+			8453: "https://basescan.org/tx/",
 		};
+
+		if (showTestnets) {
+			explorers[11155111] = "https://sepolia.etherscan.io/tx/";
+			explorers[5] = "https://goerli.etherscan.io/tx/";
+			explorers[80001] = "https://mumbai.polygonscan.com/tx/";
+		}
+
 		return `${explorers[chainId] || "https://etherscan.io/tx/"}${hash}`;
 	};
 
@@ -196,7 +338,11 @@ export function WalletManagement() {
 			newSession,
 		];
 		setWalletSessions(updatedSessions);
-		localStorage.setItem("walletSessions", JSON.stringify(updatedSessions));
+		try {
+			localStorage.setItem("walletSessions", JSON.stringify(updatedSessions));
+		} catch (error) {
+			console.error("Error saving wallet sessions:", error);
+		}
 	};
 
 	const removeWalletSession = (sessionAddress: string) => {
@@ -204,36 +350,99 @@ export function WalletManagement() {
 			(s) => s.address !== sessionAddress,
 		);
 		setWalletSessions(updatedSessions);
-		localStorage.setItem("walletSessions", JSON.stringify(updatedSessions));
+		try {
+			localStorage.setItem("walletSessions", JSON.stringify(updatedSessions));
+		} catch (error) {
+			console.error("Error removing wallet session:", error);
+		}
 	};
 
-	const switchWallet = (session: WalletSession) => {
-		disconnect();
-		// In a real implementation, you'd connect using the session's connector
-		setTimeout(() => {
-			// Simulate wallet switch
-			window.location.reload();
-		}, 1000);
+	const switchWallet = async (session: WalletSession) => {
+		try {
+			const targetConnector = connectors.find(
+				(c) => c.name === session.connectorName,
+			);
+			if (targetConnector) {
+				disconnect();
+				setTimeout(() => {
+					connect({ connector: targetConnector });
+				}, 500);
+			} else {
+				console.warn("Connector not found:", session.connectorName);
+				disconnect();
+			}
+		} catch (error) {
+			console.error("Error switching wallet:", error);
+			disconnect();
+		}
 	};
+
+	const refreshTransactions = () => {
+		if (address) {
+			const fetchTransactions = async () => {
+				setLoading(true);
+				setTransactionError(null);
+				try {
+					const baseUrl = getExplorerApiUrl(chainId);
+					const response = await fetch(
+						`${baseUrl}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=${ETHERSCAN_API_KEY}`,
+					);
+					const data = await response.json();
+					if (data.status === "1") {
+						setTransactions(data.result.slice(0, 20));
+					} else {
+						setTransactionError(data.message || "No transactions found");
+						setTransactions([]);
+					}
+				} catch (error) {
+					console.error("Error refreshing transactions:", error);
+					setTransactionError("Failed to refresh transactions");
+				} finally {
+					setLoading(false);
+				}
+			};
+			fetchTransactions();
+		}
+	};
+
+	const calculateTransactionCost = (
+		gasPrice: number,
+		gasLimit: number = 21000,
+	) => {
+		const ethCost = (gasPrice * gasLimit) / 1e9;
+		const usdCost = ethCost * ethPrice;
+		return {
+			eth: hideBalances ? "••••" : ethCost.toFixed(6),
+			usd: hideBalances ? "••••" : usdCost.toFixed(2),
+		};
+	};
+
+	// Prevent rendering during initialization
+	if (!isInitialized) {
+		return (
+			<div className="flex justify-center items-center p-8">
+				<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+			</div>
+		);
+	}
 
 	return (
 		<div className="space-y-6">
-			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div>
 					<h2 className="text-2xl font-bold text-white">Wallet Management</h2>
 					<p className="text-gray-400">
 						Advanced wallet features and transaction management
+						{hideBalances && " • Balances hidden"}
 					</p>
 				</div>
 			</div>
 
-			{/* Tabs */}
 			<div className="flex space-x-1 bg-gray-800 rounded-xl p-1">
 				{[
 					{ id: "overview", label: "Overview", icon: Wallet },
 					{ id: "transactions", label: "Transactions", icon: History },
-					{ id: "gas", label: "Gas Optimizer", icon: Gauge }, // CHANGED: Using Gauge icon
+					{ id: "gas", label: "Gas Optimizer", icon: Gauge },
 					{ id: "multiwallet", label: "Multi-Wallet", icon: Users },
 				].map((tab) => {
 					const Icon = tab.icon;
@@ -253,12 +462,10 @@ export function WalletManagement() {
 				})}
 			</div>
 
-			{/* Content */}
 			<div className="bg-gray-900/50 border border-gray-700 rounded-xl p-6">
 				{activeTab === "overview" && (
 					<div className="space-y-6">
 						<div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-							{/* Wallet Info */}
 							<div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4">
 								<div className="flex items-center gap-3 mb-4">
 									<div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center">
@@ -293,31 +500,35 @@ export function WalletManagement() {
 								</div>
 							</div>
 
-							{/* Balance */}
 							<div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4">
 								<h3 className="text-gray-400 text-sm font-medium mb-2">
 									Total Balance
 								</h3>
 								<div className="text-2xl font-bold text-white mb-1">
-									$
-									{balance
-										? (
-												parseFloat(formatEther(balance.value)) * 2800
-										  ).toLocaleString(undefined, {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-										  })
-										: "0.00"}
+									{balance && ethPrice > 0 ? (
+										formatCurrency(
+											parseFloat(formatEther(balance.value)) * ethPrice,
+										)
+									) : (
+										<span className="text-gray-400">-</span>
+									)}
 								</div>
 								<div className="text-gray-400 text-sm">
 									{balance
-										? parseFloat(formatEther(balance.value)).toFixed(4)
-										: "0"}{" "}
-									ETH
+										? hideBalances
+											? "•••• ETH"
+											: `${parseFloat(formatEther(balance.value)).toFixed(
+													6,
+											  )} ETH`
+										: "0 ETH"}
+								</div>
+								<div className="text-xs text-gray-500 mt-1">
+									{ethPrice > 0
+										? `ETH: ${formatCurrency(ethPrice)}`
+										: "Loading ETH price..."}
 								</div>
 							</div>
 
-							{/* Network Info */}
 							<div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4">
 								<h3 className="text-gray-400 text-sm font-medium mb-2">
 									Network
@@ -325,20 +536,18 @@ export function WalletManagement() {
 								<div className="flex items-center gap-2 mb-1">
 									<Shield className="h-4 w-4 text-green-400" />
 									<span className="text-white font-semibold">
-										{chainId === 1
-											? "Ethereum Mainnet"
-											: chainId === 137
-											? "Polygon"
-											: chainId === 42161
-											? "Arbitrum"
-											: `Chain ${chainId}`}
+										{getNetworkName(chainId, showTestnets)}
 									</span>
 								</div>
 								<div className="text-gray-400 text-sm">Chain ID: {chainId}</div>
+								{showTestnets && (
+									<div className="text-yellow-400 text-xs mt-1">
+										Testnets Enabled
+									</div>
+								)}
 							</div>
 						</div>
 
-						{/* Quick Stats */}
 						<div className="grid grid-cols-2 md:grid-cols-4 gap-4">
 							<div className="bg-gray-800/30 border border-gray-700 rounded-lg p-3 text-center">
 								<div className="text-white font-bold text-lg">
@@ -366,7 +575,6 @@ export function WalletManagement() {
 							</div>
 						</div>
 
-						{/* Security Tips */}
 						<div className="bg-yellow-900/20 border border-yellow-800 rounded-xl p-4">
 							<div className="flex items-center gap-2 mb-2">
 								<AlertTriangle className="h-4 w-4 text-yellow-400" />
@@ -388,8 +596,19 @@ export function WalletManagement() {
 							<h3 className="text-lg font-semibold text-white">
 								Transaction History
 							</h3>
-							<div className="text-gray-400 text-sm">
-								{transactions.length} transactions found
+							<div className="flex items-center gap-4">
+								<div className="text-gray-400 text-sm">
+									{transactions.length} transactions found
+								</div>
+								<button
+									onClick={refreshTransactions}
+									disabled={loading}
+									className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition-colors cursor-pointer disabled:opacity-50">
+									<RefreshCw
+										className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+									/>
+									Refresh
+								</button>
 							</div>
 						</div>
 
@@ -397,10 +616,21 @@ export function WalletManagement() {
 							<div className="flex justify-center py-8">
 								<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
 							</div>
+						) : transactionError ? (
+							<div className="text-center py-8 text-gray-400">
+								<AlertTriangle className="h-12 w-12 mx-auto mb-3 text-yellow-400" />
+								<p className="text-yellow-400 mb-2">{transactionError}</p>
+								<p className="text-sm">
+									Make sure you're on a supported network and try again.
+								</p>
+							</div>
 						) : transactions.length === 0 ? (
 							<div className="text-center py-8 text-gray-400">
 								<History className="h-12 w-12 mx-auto mb-3 opacity-50" />
 								<p>No transactions found</p>
+								<p className="text-sm mt-1">
+									Transactions will appear here once you make them
+								</p>
 							</div>
 						) : (
 							<div className="space-y-3 max-h-96 overflow-y-auto">
@@ -462,38 +692,48 @@ export function WalletManagement() {
 										price: gasPrices.safeLow,
 										color: "text-green-400",
 										bg: "bg-green-500/10",
+										description: "10-30 min",
 									},
 									{
 										speed: "Standard",
 										price: gasPrices.standard,
 										color: "text-yellow-400",
 										bg: "bg-yellow-500/10",
+										description: "3-5 min",
 									},
 									{
 										speed: "Fast",
 										price: gasPrices.fast,
 										color: "text-orange-400",
 										bg: "bg-orange-500/10",
+										description: "<2 min",
 									},
 									{
 										speed: "Fastest",
 										price: gasPrices.fastest,
 										color: "text-red-400",
 										bg: "bg-red-500/10",
+										description: "<30 sec",
 									},
-								].map((tier) => (
-									<div
-										key={tier.speed}
-										className={`border border-gray-700 rounded-xl p-4 text-center ${tier.bg}`}>
-										<div className={`text-2xl font-bold ${tier.color} mb-1`}>
-											{tier.price} Gwei
+								].map((tier) => {
+									const cost = calculateTransactionCost(tier.price);
+									return (
+										<div
+											key={tier.speed}
+											className={`border border-gray-700 rounded-xl p-4 text-center ${tier.bg}`}>
+											<div className={`text-2xl font-bold ${tier.color} mb-1`}>
+												{tier.price} Gwei
+											</div>
+											<div className="text-gray-300 text-sm">{tier.speed}</div>
+											<div className="text-gray-400 text-xs mt-1">
+												~${cost.usd} USD
+											</div>
+											<div className="text-gray-500 text-xs mt-1">
+												{tier.description}
+											</div>
 										</div>
-										<div className="text-gray-300 text-sm">{tier.speed}</div>
-										<div className="text-gray-400 text-xs mt-1">
-											~{Math.round(((21000 * tier.price) / 1e9) * 1000)} USD
-										</div>
-									</div>
-								))}
+									);
+								})}
 							</div>
 						) : (
 							<div className="flex justify-center py-8">
@@ -501,7 +741,6 @@ export function WalletManagement() {
 							</div>
 						)}
 
-						{/* Gas Tips */}
 						<div className="bg-blue-900/20 border border-blue-800 rounded-xl p-4">
 							<h4 className="text-blue-400 font-semibold mb-2">
 								Gas Saving Tips
@@ -514,7 +753,6 @@ export function WalletManagement() {
 							</ul>
 						</div>
 
-						{/* Current Network Stats */}
 						<div className="grid grid-cols-2 gap-4">
 							<div className="bg-gray-800/30 border border-gray-700 rounded-lg p-3">
 								<div className="text-gray-400 text-sm">Base Fee</div>
@@ -523,8 +761,10 @@ export function WalletManagement() {
 								</div>
 							</div>
 							<div className="bg-gray-800/30 border border-gray-700 rounded-lg p-3">
-								<div className="text-gray-400 text-sm">Network Utilization</div>
-								<div className="text-white font-semibold">~65%</div>
+								<div className="text-gray-400 text-sm">ETH Price</div>
+								<div className="text-white font-semibold">
+									{ethPrice > 0 ? formatCurrency(ethPrice) : "Loading..."}
+								</div>
 							</div>
 						</div>
 					</div>
@@ -539,10 +779,12 @@ export function WalletManagement() {
 							<button
 								onClick={() =>
 									address &&
+									connector &&
 									addWalletSession({
 										address,
-										connector,
+										connectorName: connector.name,
 										timestamp: Date.now(),
+										network: getNetworkName(chainId, showTestnets),
 									})
 								}
 								className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer">
@@ -574,7 +816,7 @@ export function WalletManagement() {
 													)}...${session.address.slice(-6)}`}
 												</div>
 												<div className="text-gray-400 text-xs">
-													Added{" "}
+													{session.network} • {session.connectorName} • Added{" "}
 													{new Date(session.timestamp).toLocaleDateString()}
 												</div>
 											</div>
@@ -596,7 +838,6 @@ export function WalletManagement() {
 							</div>
 						)}
 
-						{/* Wallet Security Notice */}
 						<div className="bg-purple-900/20 border border-purple-800 rounded-xl p-4">
 							<h4 className="text-purple-400 font-semibold mb-2">
 								Security Notice
@@ -611,7 +852,6 @@ export function WalletManagement() {
 				)}
 			</div>
 
-			{/* Quick Actions */}
 			<div className="flex gap-4">
 				<button
 					onClick={() => disconnect()}
@@ -631,27 +871,4 @@ export function WalletManagement() {
 			</div>
 		</div>
 	);
-}
-
-// Helper function for mock transactions (fallback)
-function generateMockTransactions(address: string): Transaction[] {
-	return Array.from({ length: 8 }, (_, i) => ({
-		hash: `0x${Math.random().toString(16).substr(2, 64)}`,
-		from:
-			i % 2 === 0 ? address : `0x${Math.random().toString(16).substr(2, 40)}`,
-		to: i % 2 === 0 ? `0x${Math.random().toString(16).substr(2, 40)}` : address,
-		value: (Math.random() * 0.1 * 1e18).toString(),
-		gasPrice: (20 + Math.random() * 50).toString(),
-		gasUsed: "21000",
-		timeStamp: Math.floor(Date.now() / 1000 - i * 3600).toString(),
-		isError: Math.random() > 0.1 ? "0" : "1",
-		functionName:
-			i % 4 === 0
-				? "swap"
-				: i % 4 === 1
-				? "transfer"
-				: i % 4 === 2
-				? "approve"
-				: "",
-	}));
 }

@@ -1,18 +1,13 @@
 /** @format */
 
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
-import { SimpleWeb3Provider } from "@/providers/SimpleWeb3Provider";
-import { Header } from "@/components/Header";
+// app/layout.tsx or pages/_app.tsx
+"use client";
 
-const inter = Inter({ subsets: ["latin"] });
+import { WagmiProvider } from "wagmi";
+import { config } from "@/lib/wagmi"; // Your wagmi config
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-export const metadata: Metadata = {
-	title: "DeFi Portfolio Tracker - Multi-Chain Asset Management",
-	description:
-		"Track, analyze, and optimize your DeFi investments across multiple chains with real-time analytics and smart alerts.",
-};
+const queryClient = new QueryClient();
 
 export default function RootLayout({
 	children,
@@ -20,14 +15,13 @@ export default function RootLayout({
 	children: React.ReactNode;
 }) {
 	return (
-		<html
-			lang="en"
-			className="dark">
-			<body className={`${inter.className} bg-black text-white`}>
-				<SimpleWeb3Provider>
-					<Header />
-					<main className="min-h-screen">{children}</main>
-				</SimpleWeb3Provider>
+		<html lang="en">
+			<body>
+				<WagmiProvider config={config}>
+					<QueryClientProvider client={queryClient}>
+						{children}
+					</QueryClientProvider>
+				</WagmiProvider>
 			</body>
 		</html>
 	);
